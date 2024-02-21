@@ -276,10 +276,12 @@ void command_history(const char* command) {
 
 
 void print_history() {
-	printf("/********** HISTORY OF COMMANDS **********/\n");
-	for(int i = 0; i < count; i++) {
-		printf("[%d] %s\n", i+1, history[i]);
+	// starting from the last command added
+	printf("\n/********** HISTORY OF COMMANDS **********/\n");
+	for(int i = count; i > 0; i--) {
+		printf("[%d] %s\n", i, history[i-1]);
 	}
+	printf("/*****************************************/\n");
 }
 
 
@@ -298,75 +300,86 @@ void execute_history(int history_num) {
 }
 
 void execute_command(char* user_command) {
-    char* args[MAX_ARG];
-    int fd[2];
-    int prev_fd = 0;
-    pid_t pid;
-    int num_comm = 0;
+    	char* args[MAX_ARG];
+    	int fd[2];
+    	int prev_fd = 0;
+	pid_t pid;
+	int num_comm = 0;
+	int success = 1;
+	
+    	for (int i = 0; user_command[i]; i++) {
+        	if (user_command[i] == '|') num_comm++;
+	}
 
-    for (int i = 0; user_command[i]; i++) {
-        if (user_command[i] == '|') num_comm++;
-    }
-    num_comm++; // Adjust for actual number of commands
+    	num_comm++; // adjust for actual number of commands
 
-    char* token = strtok(user_command, "|");
-    int i = 0;
-    while (token != NULL) {
-        args[i++] = token;
-        token = strtok(NULL, "|");
-    }
-    args[i] = NULL; // End of commands
+    	char* token = strtok(user_command, "|");
+    	int i = 0;
+    	while (token != NULL) {
+        	args[i++] = token;
+        	token = strtok(NULL, "|");
+    	}
+    	args[i] = NULL; // end of commands
 
-    for (i = 0; i < num_comm; i++) {
-        if (i < num_comm - 1) {
-            if (pipe(fd) < 0) {
-                perror("Pipe Error.");
-                exit(EXIT_FAILURE);
-            }
-        }
+    	for (i = 0; i < num_comm; i++) {
+        	if (i < num_comm - 1) {
+        		if (pipe(fd) < 0) {
+                		perror("Pipe Error.");
+                		exit(EXIT_FAILURE);
+            		}	
+        	}
 
-        pid = fork();
+        	pid = fork();
 
-        if (pid < 0) {
-            perror("Error, fork has failed!");
-            exit(EXIT_FAILURE);
-        } else if (pid == 0) { // Child process
-            if (prev_fd != 0) {
-                dup2(prev_fd, STDIN_FILENO);
-                close(prev_fd);
-            }
+        	if (pid < 0) {
+            	perror("Error, fork has failed!");
+            	exit(EXIT_FAILURE);
+		/********** CHILD PROCESS **********/   
+        	} else if (pid == 0) { 
+           		if (prev_fd != 0) {
+               			dup2(prev_fd, STDIN_FILENO);
+               			close(prev_fd);
+           		}
 
-            if (i < num_comm - 1) {
-                close(fd[READ]);
-                dup2(fd[WRITE], STDOUT_FILENO);
-                close(fd[WRITE]);
-            }
+            		if (i < num_comm - 1) {
+                		close(fd[READ]);
+                		dup2(fd[WRITE], STDOUT_FILENO);
+                		close(fd[WRITE]);
+            		}
 
-            file_redirection(args[i]);
+            		file_redirection(args[i]);
 
-            char* arr[MAX_ARG];
-            char* command_token = strtok(args[i], " \t");
-            int j = 0;
-            while (command_token != NULL) {
-                arr[j++] = command_token;
-                command_token = strtok(NULL, " \t");
-            }
-            arr[j] = NULL;
+            		char* arr[MAX_ARG];
+            		char* command_token = strtok(args[i], " \t");
+            		int j = 0;
+            		while (command_token != NULL) {
+                		arr[j++] = command_token;
+                		command_token = strtok(NULL, " \t");
+            		}
+            		arr[j] = NULL;
 
-            if (execvp(arr[0], arr) < 0) {
-                perror("Error, execvp failed!");
-                exit(EXIT_FAILURE);
-            }
-            exit(EXIT_SUCCESS);
-        } else { // Parent process
-            if (prev_fd != 0) {
-                close(prev_fd);
-            }
-            if (i < num_comm - 1) {
-                close(fd[WRITE]);
-                prev_fd = fd[READ];
-            }
-            wait(NULL); // Wait for child process to finish
-        }
-    }
+            		if (execvp(arr[0], arr) < 0) {
+                		perror("Error, execvp failed!");
+                		exit(EXIT_FAILURE);
+            		}
+            		exit(EXIT_SUCCESS);
+		/********** PARENT PROCESS **********/
+        	} else {
+			int status;
+			
+			waitpid(pid, &status, 0);	// wait for child process to finish
+			
+			if(!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+				success = 0;	// command failed
+			}	
+            		if (prev_fd != 0) {
+                		close(prev_fd);
+            		}
+            		if (i < num_comm - 1) {
+                		close(fd[WRITE]);
+                		prev_fd = fd[READ];
+            		}
+            		wait(NULL); // wait for child process to finish
+        	}
+    	}
 }
