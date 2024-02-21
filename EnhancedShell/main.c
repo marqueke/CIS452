@@ -29,11 +29,20 @@
 // macros
 #define MAX_LENGTH 10000
 #define MAX_ARG 100
+#define MAX_HISTORY 10
 #define READ 0
 #define WRITE 1
 
 
 void file_redirection(char* command);
+void command_history(const char* command);
+void print_history();
+void execute_history(int history_num);
+void execute_command(char* user_command);
+
+// global variables
+char* history[MAX_HISTORY] = {NULL};
+int count = 0;
 
 int main(int argc, char* argv[]) {
 	char user_command[MAX_LENGTH];
@@ -48,7 +57,8 @@ int main(int argc, char* argv[]) {
 		printf("[2] Read the input from a .txt file by typing the command followed by a '<', then the name of the .txt file.\n");
 		printf("[3] Save the command text to a file by typing the command followed by a '>', then the name of the .txt file.\n");
 	       	printf("[4] Overwrite the contents of a file by typing the command followed by a '>!', then the name of the .txt file.\n");
-		printf("[5] Type 'quit' to quit the program.\n");
+		printf("[5] Type 'history' to view the history of commands in reverse order.\n");
+		printf("[6] Type 'quit' to quit the program.\n");
 		printf("\n[TYPE HERE]: \n");
 
 		fflush(stdout);
@@ -61,11 +71,24 @@ int main(int argc, char* argv[]) {
  	 	}
 
 		user_command[strcspn(user_command, "\n")] = '\0';
-	       	
-		// if user quits, the while loop is exited out of and program ends		
-		if(strcmp(user_command, "quit") == 0) { 
+
+		if(strcmp(user_command, "history") == 0) {
+			print_history();
+			continue;
+		} else if(user_command[0] == '!') {
+			int history_num = atoi(&user_command[1]);
+			if(history_num > 0 && history_num <= count) {
+				execute_history(history_num);
+				continue;
+			} else {
+				printf("Invalid history reference '%s'\n", user_command);
+				continue;
+			}
+		} else if(strcmp(user_command, "quit") == 0) {
 			break;
 		}
+
+		command_history(user_command);
 
 		int num_comm = 1;
 		for(i = 0; user_command[i]; i++) {
@@ -94,8 +117,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			pid = fork();
-
- 
+ 			
 			// fork error checking
 			if(pid < 0) {
 				perror("Error, fork has failed!");
@@ -113,7 +135,7 @@ int main(int argc, char* argv[]) {
 					close(fd[READ]);
 					dup2(fd[WRITE], STDOUT_FILENO);
 					close(fd[WRITE]);
-				}
+					}
 
 				// handling redirection
 				file_redirection(args[i]);
@@ -125,7 +147,7 @@ int main(int argc, char* argv[]) {
 				while(token != NULL) {
 					arr[j++] = token;
 					token = strtok(NULL, " \t");
-				}
+				}	
 				arr[j] = NULL;
 
 				// executting user input command and error checking
@@ -148,6 +170,11 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		
+	}
+	
+	// free allocated memory
+	for(int i = 0; i < count; i++) {
+		free(history[i]);
 	}
 
 	return 0;
@@ -235,4 +262,111 @@ void file_redirection(char* command) {
 }
 
 
+void command_history(const char* command) {
+	// free oldest command if max is full
+	if(count == MAX_HISTORY) {
+		free(history[0]);
+		for(int i = 1; i < MAX_HISTORY; i++) {
+			history[i-1] = history[i];
+		}
+		count--;
+	}
+	history[count++] = strdup(command);
+}
 
+
+void print_history() {
+	printf("/********** HISTORY OF COMMANDS **********/\n");
+	for(int i = 0; i < count; i++) {
+		printf("[%d] %s\n", i+1, history[i]);
+	}
+}
+
+
+void execute_history(int history_num) {
+	if(history_num < 1 || history_num > count) {
+		printf("[ERROR. COMMAND IS NOT IN HISTORY.]\n");
+		return;
+	}
+	// extract command from history
+	char* command = history[history_num - 1];
+	printf("Executing command: %s\n", command);
+	
+	execute_command(command);
+	free(command);
+
+}
+
+void execute_command(char* user_command) {
+    char* args[MAX_ARG];
+    int fd[2];
+    int prev_fd = 0;
+    pid_t pid;
+    int num_comm = 0;
+
+    for (int i = 0; user_command[i]; i++) {
+        if (user_command[i] == '|') num_comm++;
+    }
+    num_comm++; // Adjust for actual number of commands
+
+    char* token = strtok(user_command, "|");
+    int i = 0;
+    while (token != NULL) {
+        args[i++] = token;
+        token = strtok(NULL, "|");
+    }
+    args[i] = NULL; // End of commands
+
+    for (i = 0; i < num_comm; i++) {
+        if (i < num_comm - 1) {
+            if (pipe(fd) < 0) {
+                perror("Pipe Error.");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        pid = fork();
+
+        if (pid < 0) {
+            perror("Error, fork has failed!");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) { // Child process
+            if (prev_fd != 0) {
+                dup2(prev_fd, STDIN_FILENO);
+                close(prev_fd);
+            }
+
+            if (i < num_comm - 1) {
+                close(fd[READ]);
+                dup2(fd[WRITE], STDOUT_FILENO);
+                close(fd[WRITE]);
+            }
+
+            file_redirection(args[i]);
+
+            char* arr[MAX_ARG];
+            char* command_token = strtok(args[i], " \t");
+            int j = 0;
+            while (command_token != NULL) {
+                arr[j++] = command_token;
+                command_token = strtok(NULL, " \t");
+            }
+            arr[j] = NULL;
+
+            if (execvp(arr[0], arr) < 0) {
+                perror("Error, execvp failed!");
+                exit(EXIT_FAILURE);
+            }
+            exit(EXIT_SUCCESS);
+        } else { // Parent process
+            if (prev_fd != 0) {
+                close(prev_fd);
+            }
+            if (i < num_comm - 1) {
+                close(fd[WRITE]);
+                prev_fd = fd[READ];
+            }
+            wait(NULL); // Wait for child process to finish
+        }
+    }
+}
