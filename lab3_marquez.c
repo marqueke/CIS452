@@ -51,6 +51,7 @@ int main(int argc, char* argv[]) {
 		else {
 			printf("Using strtok() on %s\n", user_command);
 			tok = strtok(user_command, " \n");
+			i = 0;
 			while(tok != NULL) {
 				arg[i] = tok;
 				printf("[%s]\n", tok);

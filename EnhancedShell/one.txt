@@ -1,0 +1,5 @@
+Makefile
+a.out
+main.c
+one.txt
+shell
