@@ -38,7 +38,7 @@ void file_redirection(char* command);
 void command_history(const char* command);
 void print_history();
 void execute_history(int history_num);
-void execute_command(char* user_command);
+int execute_command(char* user_command);
 
 // global variables
 char* history[MAX_HISTORY] = {NULL};
@@ -46,10 +46,7 @@ int count = 0;
 
 int main(int argc, char* argv[]) {
 	char user_command[MAX_LENGTH];
-	char* args[MAX_ARG];
-	int fd[2];		// pipes
-	int prev_fd, i;
-	pid_t pid;
+	int i;
 
 	while(1) {
 		// user prompt
@@ -58,7 +55,8 @@ int main(int argc, char* argv[]) {
 		printf("[3] Save the command text to a file by typing the command followed by a '>', then the name of the .txt file.\n");
 	       	printf("[4] Overwrite the contents of a file by typing the command followed by a '>!', then the name of the .txt file.\n");
 		printf("[5] Type 'history' to view the history of commands in reverse order.\n");
-		printf("[6] Type 'quit' to quit the program.\n");
+		printf("[6] Type '!#' to execute that command in the command history queue.\n");
+		printf("[7] Type 'quit' to quit the program.\n");
 		printf("\n[TYPE HERE]: \n");
 
 		fflush(stdout);
@@ -88,7 +86,9 @@ int main(int argc, char* argv[]) {
 			break;
 		}
 
-		command_history(user_command);
+		if(execute_command(user_command)) {
+			command_history(user_command);
+		}
 
 		int num_comm = 1;
 		for(i = 0; user_command[i]; i++) {
@@ -96,82 +96,7 @@ int main(int argc, char* argv[]) {
 				num_comm++;
 			}
 		}
-
-		char* token = strtok(user_command, "|");
-		i = 0;
-		while(token != NULL) {
-			args[i++] = token;
-			token = strtok(NULL, "|");
-		}
-		args[i] = NULL;	// end of num commands
-
-		prev_fd = 0;	// use STDIN for first command
-		
-		for(i = 0; i < num_comm; i++) {
-			// create pipes except for last command
-			if(i < num_comm - 1) {
-				if(pipe(fd) < 0) {
-					perror("Pipe Error.");
-					exit(EXIT_FAILURE);
-				}
-			}
-
-			pid = fork();
- 			
-			// fork error checking
-			if(pid < 0) {
-				perror("Error, fork has failed!");
-				exit(EXIT_FAILURE);
-			}
-			/********** CHILD PROCESS **********/
-			else if(pid == 0) {
-				if(prev_fd != 0) {
-					dup2(prev_fd, STDIN_FILENO);
-					close(prev_fd);
-				}
-
-				// redirect output to next command
-				if(i < num_comm - 1) {
-					close(fd[READ]);
-					dup2(fd[WRITE], STDOUT_FILENO);
-					close(fd[WRITE]);
-					}
-
-				// handling redirection
-				file_redirection(args[i]);
-
-				// parse and execute commands
-				char* arr[MAX_ARG];
-				char* token = strtok(args[i], " \t");
-				int j = 0;
-				while(token != NULL) {
-					arr[j++] = token;
-					token = strtok(NULL, " \t");
-				}	
-				arr[j] = NULL;
-
-				// executting user input command and error checking
-				if(execvp(arr[0], arr) < 0) {
-					perror("Error, execvp failed!");
-					exit(EXIT_FAILURE);
-				}
-				exit(EXIT_SUCCESS);
-			/********** PARENET PROCESS **********/
-			} 
-			else {
-				if(prev_fd != 0) {
-					close(prev_fd);
-				}
-				if(i < num_comm - 1) {
-					close(fd[WRITE]);
-					prev_fd = fd[READ];
-				}
-				wait(NULL);	// wait for child process to finish
-			}
-		}
-		
 	}
-	
 	// free allocated memory
 	for(int i = 0; i < count; i++) {
 		free(history[i]);
@@ -299,19 +224,18 @@ void execute_history(int history_num) {
 
 }
 
-void execute_command(char* user_command) {
-    	char* args[MAX_ARG];
+int execute_command(char* user_command) {
+	char* args[MAX_ARG];
     	int fd[2];
     	int prev_fd = 0;
-	pid_t pid;
-	int num_comm = 0;
-	int success = 1;
-	
-    	for (int i = 0; user_command[i]; i++) {
+    	pid_t pid;
+    	int num_comm = 0;
+	int success = 1;	// assume command is successful
+    	
+	for (int i = 0; user_command[i]; i++) {
         	if (user_command[i] == '|') num_comm++;
-	}
-
-    	num_comm++; // adjust for actual number of commands
+    	}
+    	num_comm++; 		// adjust for actual number of commands
 
     	char* token = strtok(user_command, "|");
     	int i = 0;
@@ -319,27 +243,27 @@ void execute_command(char* user_command) {
         	args[i++] = token;
         	token = strtok(NULL, "|");
     	}
-    	args[i] = NULL; // end of commands
+    	args[i] = NULL; 	// end of commands
 
     	for (i = 0; i < num_comm; i++) {
         	if (i < num_comm - 1) {
-        		if (pipe(fd) < 0) {
+            		if (pipe(fd) < 0) {
                 		perror("Pipe Error.");
                 		exit(EXIT_FAILURE);
-            		}	
+            		}
         	}
 
         	pid = fork();
 
         	if (pid < 0) {
-            	perror("Error, fork has failed!");
-            	exit(EXIT_FAILURE);
-		/********** CHILD PROCESS **********/   
+            		perror("Error, fork has failed!");
+            		exit(EXIT_FAILURE);
+		/********** CHILD PROCESS **********/
         	} else if (pid == 0) { 
-           		if (prev_fd != 0) {
-               			dup2(prev_fd, STDIN_FILENO);
-               			close(prev_fd);
-           		}
+            		if (prev_fd != 0) {
+                		dup2(prev_fd, STDIN_FILENO);
+                		close(prev_fd);
+            		}
 
             		if (i < num_comm - 1) {
                 		close(fd[READ]);
@@ -364,14 +288,12 @@ void execute_command(char* user_command) {
             		}
             		exit(EXIT_SUCCESS);
 		/********** PARENT PROCESS **********/
-        	} else {
+        	} else { 
 			int status;
-			
-			waitpid(pid, &status, 0);	// wait for child process to finish
-			
+			waitpid(pid, &status, 0);	// wait for specific child process to finish
 			if(!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-				success = 0;	// command failed
-			}	
+				success = 0;		// if child process did not exit successfully or did not exit with status 0, command failed
+			}
             		if (prev_fd != 0) {
                 		close(prev_fd);
             		}
@@ -379,7 +301,8 @@ void execute_command(char* user_command) {
                 		close(fd[WRITE]);
                 		prev_fd = fd[READ];
             		}
-            		wait(NULL); // wait for child process to finish
+            		wait(NULL); // Wait for child process to finish
         	}
     	}
+	return success;
 }
